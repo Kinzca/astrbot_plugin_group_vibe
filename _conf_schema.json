@@ -1,0 +1,212 @@
+{
+  "enabled": {
+    "description": "启用群聊氛围回复",
+    "type": "bool",
+    "default": true,
+    "hint": "关闭后插件不会主动接话"
+  },
+  "allowed_group_ids": {
+    "description": "允许生效的群号",
+    "type": "string",
+    "default": "",
+    "hint": "多个群号用英文逗号分隔；留空表示所有群都可生效"
+  },
+  "quiet_cooldown_seconds": {
+    "description": "冷群冷却秒数",
+    "type": "int",
+    "default": 60,
+    "hint": "群里最近 90 秒消息较少时，普通接话的最短间隔"
+  },
+  "warm_cooldown_seconds": {
+    "description": "中等活跃冷却秒数",
+    "type": "int",
+    "default": 25,
+    "hint": "群里最近 90 秒达到中等活跃时，普通接话的最短间隔"
+  },
+  "hot_cooldown_seconds": {
+    "description": "很活跃冷却秒数",
+    "type": "int",
+    "default": 10,
+    "hint": "群里最近 90 秒很活跃时，普通接话的最短间隔"
+  },
+  "interaction_window_seconds": {
+    "description": "连续互动窗口秒数",
+    "type": "int",
+    "default": 150,
+    "hint": "机器人刚回复后，在这个时间内更容易把后续消息视为连续互动"
+  },
+  "interaction_gap_seconds": {
+    "description": "连续互动最短间隔秒数",
+    "type": "int",
+    "default": 3,
+    "hint": "连续互动场景下，两次回复之间至少间隔几秒"
+  },
+  "normal_probability": {
+    "description": "普通消息回复概率",
+    "type": "float",
+    "default": 0.22,
+    "hint": "0 到 1；普通聊天消息触发回复的基础概率"
+  },
+  "question_probability": {
+    "description": "疑问句回复概率",
+    "type": "float",
+    "default": 0.65,
+    "hint": "0 到 1；包含疑问关键词时的基础回复概率"
+  },
+  "vibe_probability": {
+    "description": "气氛词回复概率",
+    "type": "float",
+    "default": 0.45,
+    "hint": "0 到 1；包含笑死、离谱等气氛词时的基础回复概率"
+  },
+  "interaction_probability_floor": {
+    "description": "连续互动最低回复概率",
+    "type": "float",
+    "default": 0.9,
+    "hint": "0 到 1；连续互动时回复概率至少达到这个值"
+  },
+  "interaction_probability_cap": {
+    "description": "连续互动最高回复概率",
+    "type": "float",
+    "default": 0.96,
+    "hint": "0 到 1；连续互动时回复概率不会超过这个值"
+  },
+  "non_interaction_probability_min": {
+    "description": "非互动最低回复概率",
+    "type": "float",
+    "default": 0.03,
+    "hint": "0 到 1；普通场景概率衰减后不会低于这个值"
+  },
+  "non_interaction_probability_cap": {
+    "description": "非互动最高回复概率",
+    "type": "float",
+    "default": 0.72,
+    "hint": "0 到 1；普通场景概率提升后不会超过这个值"
+  },
+  "hot_message_threshold": {
+    "description": "很活跃消息阈值",
+    "type": "int",
+    "default": 8,
+    "hint": "最近 90 秒消息数达到该值时视为很活跃"
+  },
+  "warm_message_threshold": {
+    "description": "中等活跃消息阈值",
+    "type": "int",
+    "default": 4,
+    "hint": "最近 90 秒消息数达到该值时视为中等活跃"
+  },
+  "hot_probability_boost": {
+    "description": "很活跃概率加成",
+    "type": "float",
+    "default": 0.12,
+    "hint": "群很活跃时给回复概率额外加多少"
+  },
+  "warm_probability_boost": {
+    "description": "中等活跃概率加成",
+    "type": "float",
+    "default": 0.06,
+    "hint": "群中等活跃时给回复概率额外加多少"
+  },
+  "heavy_reply_threshold": {
+    "description": "重度刷屏回复阈值",
+    "type": "int",
+    "default": 14,
+    "hint": "最近 10 分钟回复达到该值后，会明显降低回复概率"
+  },
+  "medium_reply_threshold": {
+    "description": "中度刷屏回复阈值",
+    "type": "int",
+    "default": 9,
+    "hint": "最近 10 分钟回复达到该值后，会适度降低回复概率"
+  },
+  "heavy_reply_multiplier": {
+    "description": "重度刷屏概率倍率",
+    "type": "float",
+    "default": 0.45,
+    "hint": "触发重度刷屏保护后，回复概率乘以该值"
+  },
+  "medium_reply_multiplier": {
+    "description": "中度刷屏概率倍率",
+    "type": "float",
+    "default": 0.75,
+    "hint": "触发中度刷屏保护后，回复概率乘以该值"
+  },
+  "heavy_reply_cooldown_threshold": {
+    "description": "重度冷却保护阈值",
+    "type": "int",
+    "default": 12,
+    "hint": "最近 10 分钟回复达到该值后，最低冷却会被拉高"
+  },
+  "medium_reply_cooldown_threshold": {
+    "description": "中度冷却保护阈值",
+    "type": "int",
+    "default": 8,
+    "hint": "最近 10 分钟回复达到该值后，最低冷却会被适度拉高"
+  },
+  "heavy_reply_min_cooldown_seconds": {
+    "description": "重度保护最低冷却秒数",
+    "type": "int",
+    "default": 45,
+    "hint": "触发重度冷却保护后，普通接话冷却至少为该值"
+  },
+  "medium_reply_min_cooldown_seconds": {
+    "description": "中度保护最低冷却秒数",
+    "type": "int",
+    "default": 25,
+    "hint": "触发中度冷却保护后，普通接话冷却至少为该值"
+  },
+  "provider_temperature": {
+    "description": "模型温度",
+    "type": "float",
+    "default": 0.85,
+    "hint": "回复生成的随机度，越高越活泼，建议 0.7 到 1.0"
+  },
+  "max_reply_chars": {
+    "description": "单次回复最大字数",
+    "type": "int",
+    "default": 45,
+    "hint": "超过该长度会截断，避免群聊回复太长"
+  },
+  "history_maxlen": {
+    "description": "群聊上下文缓存条数",
+    "type": "int",
+    "default": 14,
+    "hint": "插件内部为每个群保存的最近消息条数"
+  },
+  "message_times_maxlen": {
+    "description": "消息时间缓存条数",
+    "type": "int",
+    "default": 120,
+    "hint": "用于判断群活跃程度的消息时间缓存上限"
+  },
+  "reply_times_maxlen": {
+    "description": "回复时间缓存条数",
+    "type": "int",
+    "default": 80,
+    "hint": "用于判断是否回复过密的机器人回复时间缓存上限"
+  },
+  "vibe_keywords": {
+    "description": "气氛关键词",
+    "type": "string",
+    "default": "笑死,离谱,绷不住,草,好家伙,抽象,乐,逆天,蚌埠住,绝了",
+    "hint": "用英文逗号分隔；命中后使用气氛词回复概率"
+  },
+  "question_keywords": {
+    "description": "疑问关键词",
+    "type": "string",
+    "default": "吗,嘛,么,为什么,咋,怎么,有没有,是不是,啥,？,?",
+    "hint": "用英文逗号分隔；命中后使用疑问句回复概率，也会影响连续互动判断"
+  },
+  "continuation_keywords": {
+    "description": "连续互动关键词",
+    "type": "string",
+    "default": "你,刚才,那,所以,不是,确实,对,哈哈,笑死,然后,但是",
+    "hint": "用英文逗号分隔；机器人刚回复后命中这些词更容易继续互动"
+  },
+  "block_keywords": {
+    "description": "敏感阻断关键词",
+    "type": "string",
+    "default": "借钱,转账,密码,验证码,隐私,地址,身份证,银行卡,表白,分手,吵架,开盒",
+    "hint": "用英文逗号分隔；命中后插件不会主动回复"
+  }
+}

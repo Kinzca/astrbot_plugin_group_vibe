@@ -1,0 +1,6 @@
+name: astrbot_plugin_group_vibe
+display_name: 群聊氛围接话
+desc: 让机器人像普通群友一样低频、按气氛主动参与群聊，并支持 WebUI 参数配置。
+version: v0.1.0
+author: Codex
+repo: https://github.com/Kinzca/astrbot_plugin_group_vibe
