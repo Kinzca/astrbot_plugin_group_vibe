@@ -250,6 +250,24 @@
     "default": 120,
     "hint": "自动真假判断回复的最大长度。"
   },
+  "enable_auto_fact_search": {
+    "description": "自动真假判断启用联网搜索",
+    "type": "bool",
+    "default": true,
+    "hint": "需要额外安装 astrbot_plugin_anysearch。开启后，命中真假判断场景时会先调用 anysearch_search 获取摘要，再交给模型生成自然回复。"
+  },
+  "fact_search_max_results": {
+    "description": "真假判断搜索结果数",
+    "type": "int",
+    "default": 5,
+    "hint": "每次自动真假判断最多读取几条搜索结果。"
+  },
+  "fact_search_timeout_seconds": {
+    "description": "真假判断搜索超时秒数",
+    "type": "int",
+    "default": 10,
+    "hint": "Anysearch 搜索超时后会回退到仅模型判断，不影响正常聊天。"
+  },
   "fact_check_keywords": {
     "description": "真假判断关键词",
     "type": "string",

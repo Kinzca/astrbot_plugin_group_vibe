@@ -87,6 +87,9 @@ class GroupVibePlugin(Star):
         self.fact_check_cooldown_seconds = self._get_int("fact_check_cooldown_seconds", 480, 0, 3600)
         self.fact_check_provider_id = str(self.config.get("fact_check_provider_id") or "").strip()
         self.fact_check_max_chars = self._get_int("fact_check_max_chars", 120, 30, 300)
+        self.enable_auto_fact_search = self._get_bool("enable_auto_fact_search", True)
+        self.fact_search_max_results = self._get_int("fact_search_max_results", 5, 1, 10)
+        self.fact_search_timeout_seconds = self._get_int("fact_search_timeout_seconds", 10, 1, 30)
 
         self.vibe_keywords = self._get_keyword_list(
             "vibe_keywords",
@@ -116,6 +119,7 @@ class GroupVibePlugin(Star):
             f"question={self.question_probability:.2f} "
             f"vibe={self.vibe_probability:.2f} "
             f"fact_check={self.enable_auto_fact_check}/{self.fact_check_probability:.2f} "
+            f"fact_search={self.enable_auto_fact_search} "
             f"topic_seed={self.enable_dailyhub_topic_seed}/{self.dailyhub_topic_probability:.2f} "
             f"cooldowns={self.quiet_cooldown_seconds}/"
             f"{self.warm_cooldown_seconds}/"
@@ -234,8 +238,13 @@ class GroupVibePlugin(Star):
             return False
 
         try:
+            search_block = await self._fact_search(event, text)
             response = await provider.text_chat(
-                prompt=self._build_fact_check_prompt(text, list(self.history[umo])),
+                prompt=self._build_fact_check_prompt(
+                    text,
+                    list(self.history[umo]),
+                    search_block,
+                ),
                 session_id=f"group-vibe-fact:{umo}",
                 contexts=[],
                 system_prompt=(
@@ -262,6 +271,53 @@ class GroupVibePlugin(Star):
             logger.error(f"group_vibe fact check failed: {exc}")
             return False
 
+    async def _fact_search(self, event: AstrMessageEvent, text: str) -> str:
+        if not self.enable_auto_fact_search:
+            return ""
+        try:
+            tool_manager = getattr(self.context, "get_llm_tool_manager", lambda: None)()
+            tool = tool_manager.get_func("anysearch_search") if tool_manager else None
+            if not tool or not getattr(tool, "active", True) or not hasattr(tool, "run"):
+                logger.debug("group_vibe: anysearch_search tool unavailable")
+                return ""
+            result = await self._run_with_timeout(
+                tool.run(
+                    event,
+                    query=self._fact_search_query(text),
+                    max_results=self.fact_search_max_results,
+                    freshness="",
+                    content_types=["web", "news"],
+                ),
+                self.fact_search_timeout_seconds,
+            )
+            text_result = str(result or "").strip()
+            if not text_result or text_result.startswith("错误："):
+                logger.warning(f"group_vibe fact search empty/error: {text_result[:120]}")
+                return ""
+            return text_result[:1800]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"group_vibe fact search failed: {exc}")
+            return ""
+
+    async def _run_with_timeout(self, coro, timeout_seconds: int):
+        try:
+            import asyncio
+
+            return await asyncio.wait_for(coro, timeout=timeout_seconds)
+        except TimeoutError:
+            logger.warning("group_vibe fact search timed out")
+            return ""
+
+    def _fact_search_query(self, text: str) -> str:
+        query = re.sub(r"\s+", " ", text).strip()
+        query = re.sub(
+            r"(真的假的啊?|这是真的吗|是真的吗|真吗|有出处吗|来源呢|靠谱吗|可信么|可信不)",
+            " ",
+            query,
+        )
+        query = re.sub(r"\s+", " ", query).strip()
+        return query or text.strip()
+
     def _is_fact_check_candidate(self, text: str) -> bool:
         lowered = text.lower()
         if any(keyword and keyword in text for keyword in self.fact_check_keywords):
@@ -275,19 +331,34 @@ class GroupVibePlugin(Star):
             return True
         return any(keyword in lowered for keyword in ("real?", "true?", "fake?"))
 
-    def _build_fact_check_prompt(self, latest_text: str, history: list[str]) -> str:
+    def _build_fact_check_prompt(
+        self,
+        latest_text: str,
+        history: list[str],
+        search_block: str = "",
+    ) -> str:
         history_text = "\n".join(history[-8:])
+        search_text = ""
+        if search_block:
+            search_text = f"""
+
+联网搜索摘要：
+{search_block}
+
+上面的摘要可能不完整，但如果里面有明确来源或时间信息，请优先参考它。
+"""
         return f"""
 最近群聊：
 {history_text}
 
 需要顺手判断的一句：
 {latest_text}
+{search_text}
 
 请判断这句话里的事实主张是否明显可信。你不一定有联网能力：
 - 如果能根据常识或上下文判断，就自然地说一句结论。
 - 如果需要最新资料或可靠来源，就说“这个得看来源/我不敢直接下结论”。
-- 不要装作已经联网查过。
+- 如果上面给了联网搜索摘要，可以说“看搜到的结果/资料里更像是...”，但不要编造没有出现的来源。
 - 不要输出 true/false/unknown 格式。
 """.strip()
 
