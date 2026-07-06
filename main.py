@@ -1,3 +1,4 @@
+import json
 import random
 import re
 import time
@@ -7,6 +8,16 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Plain
 from astrbot.api.star import Context, Star, register
+
+TOPIC_ENDPOINTS = {
+    "news60s": "/v2/60s",
+    "itnews": "/v2/it-news",
+    "ithome": "/v2/it-news/rank",
+    "douyin": "/v2/douyin",
+    "rednote": "/v2/rednote",
+    "bili": "/v2/bili",
+    "weibo": "/v2/weibo",
+}
 
 
 @register(
@@ -28,6 +39,8 @@ class GroupVibePlugin(Star):
         self.reply_times = defaultdict(lambda: deque(maxlen=self.reply_times_maxlen))
         self.last_reply_at: dict[str, float] = {}
         self.last_reply_sender: dict[str, str] = {}
+        self.last_fact_check_at: dict[str, float] = {}
+        self.topic_cache: dict[str, object] = {"expires_at": 0.0, "text": ""}
 
         self.enabled = self._get_bool("enabled", True)
         self.allowed_group_ids = self._get_keyword_list("allowed_group_ids", "")
@@ -57,6 +70,23 @@ class GroupVibePlugin(Star):
         self.medium_reply_min_cooldown_seconds = self._get_int("medium_reply_min_cooldown_seconds", 25, 0, 3600)
         self.provider_temperature = self._get_float("provider_temperature", 0.85, 0.0, 2.0)
         self.max_reply_chars = self._get_int("max_reply_chars", 45, 8, 200)
+        self.enable_dailyhub_topic_seed = self._get_bool("enable_dailyhub_topic_seed", True)
+        self.dailyhub_api_base_url = str(
+            self.config.get("dailyhub_api_base_url") or "https://60s.viki.moe"
+        ).rstrip("/")
+        self.dailyhub_topic_sources = self._get_keyword_list(
+            "dailyhub_topic_sources",
+            "weibo,bili,douyin,rednote,itnews,ithome,news60s",
+        )
+        self.dailyhub_topic_refresh_seconds = self._get_int("dailyhub_topic_refresh_seconds", 1800, 60, 86400)
+        self.dailyhub_topic_probability = self._get_float("dailyhub_topic_probability", 0.18, 0.0, 1.0)
+        self.dailyhub_topic_max_items = self._get_int("dailyhub_topic_max_items", 8, 1, 30)
+        self.dailyhub_topic_timeout_seconds = self._get_int("dailyhub_topic_timeout_seconds", 6, 1, 30)
+        self.enable_auto_fact_check = self._get_bool("enable_auto_fact_check", True)
+        self.fact_check_probability = self._get_float("fact_check_probability", 0.38, 0.0, 1.0)
+        self.fact_check_cooldown_seconds = self._get_int("fact_check_cooldown_seconds", 480, 0, 3600)
+        self.fact_check_provider_id = str(self.config.get("fact_check_provider_id") or "").strip()
+        self.fact_check_max_chars = self._get_int("fact_check_max_chars", 120, 30, 300)
 
         self.vibe_keywords = self._get_keyword_list(
             "vibe_keywords",
@@ -74,6 +104,10 @@ class GroupVibePlugin(Star):
             "continuation_keywords",
             "你,刚才,那,所以,不是,确实,对,哈哈,笑死,然后,但是",
         )
+        self.fact_check_keywords = self._get_keyword_list(
+            "fact_check_keywords",
+            "真的假的,这是真的吗,是真的吗,真吗,有出处吗,来源呢,网传,听说,据说,辟谣,造谣,假消息,靠谱吗,可信么,可信不,真的假的啊",
+        )
 
         logger.info(
             "group_vibe config loaded: "
@@ -81,6 +115,8 @@ class GroupVibePlugin(Star):
             f"normal={self.normal_probability:.2f} "
             f"question={self.question_probability:.2f} "
             f"vibe={self.vibe_probability:.2f} "
+            f"fact_check={self.enable_auto_fact_check}/{self.fact_check_probability:.2f} "
+            f"topic_seed={self.enable_dailyhub_topic_seed}/{self.dailyhub_topic_probability:.2f} "
             f"cooldowns={self.quiet_cooldown_seconds}/"
             f"{self.warm_cooldown_seconds}/"
             f"{self.hot_cooldown_seconds}"
@@ -122,6 +158,9 @@ class GroupVibePlugin(Star):
         if self._blocked(latest_text):
             return
 
+        if await self._maybe_fact_check(event, umo, latest_text, now):
+            return
+
         is_interaction = self._is_interaction(umo, sender_id, latest_text, now)
         if is_interaction:
             if now - self.last_reply_at.get(umo, 0) < self.interaction_gap_seconds:
@@ -151,8 +190,9 @@ class GroupVibePlugin(Star):
             if isinstance(persona, dict):
                 persona_prompt = persona.get("prompt", "") or ""
 
+            topic_hint = await self._maybe_topic_hint()
             response = await provider.text_chat(
-                prompt=self._build_prompt(latest_text, list(self.history[umo])),
+                prompt=self._build_prompt(latest_text, list(self.history[umo]), topic_hint),
                 session_id=f"group-vibe:{umo}",
                 contexts=[],
                 system_prompt=self._build_system_prompt(persona_prompt),
@@ -168,6 +208,185 @@ class GroupVibePlugin(Star):
             await event.send(MessageChain([Plain(reply)]))
         except Exception as exc:
             logger.error(f"group_vibe reply failed: {exc}")
+
+    async def _maybe_fact_check(
+        self,
+        event: AstrMessageEvent,
+        umo: str,
+        text: str,
+        now: float,
+    ) -> bool:
+        if not self.enable_auto_fact_check:
+            return False
+        if not self._is_fact_check_candidate(text):
+            return False
+        if now - self.last_fact_check_at.get(umo, 0) < self.fact_check_cooldown_seconds:
+            return False
+        if random.random() >= self.fact_check_probability:
+            return False
+
+        provider = None
+        if self.fact_check_provider_id:
+            provider = self.context.get_provider_by_id(self.fact_check_provider_id)
+        provider = provider or self.context.get_using_provider(umo)
+        if not provider:
+            logger.warning("group_vibe: no provider available for fact check")
+            return False
+
+        try:
+            response = await provider.text_chat(
+                prompt=self._build_fact_check_prompt(text, list(self.history[umo])),
+                session_id=f"group-vibe-fact:{umo}",
+                contexts=[],
+                system_prompt=(
+                    "你是在 QQ 群里顺手帮忙判断消息真假的群友。"
+                    "不要像公告或搜索机器人，不要列长清单。"
+                    "如果无法确认，就直接说不敢下结论，并提醒需要来源。"
+                    "只输出一句自然的群聊回复。"
+                ),
+                temperature=0.35,
+            )
+            reply = self._clean_reply(response.completion_text)
+            if not reply:
+                return False
+            if len(reply) > self.fact_check_max_chars:
+                reply = reply[: self.fact_check_max_chars].rstrip("，。！？,.!?、 ") + "..."
+
+            self.last_fact_check_at[umo] = now
+            self.last_reply_at[umo] = now
+            self.last_reply_sender[umo] = event.get_sender_id() or ""
+            self.reply_times[umo].append(now)
+            await event.send(MessageChain([Plain(reply)]))
+            return True
+        except Exception as exc:
+            logger.error(f"group_vibe fact check failed: {exc}")
+            return False
+
+    def _is_fact_check_candidate(self, text: str) -> bool:
+        lowered = text.lower()
+        if any(keyword and keyword in text for keyword in self.fact_check_keywords):
+            return True
+        if re.search(r"(网传|听说|据说|有人说|真的假的|真假|辟谣|造谣)", text):
+            return True
+        if ("?" in text or "？" in text) and re.search(
+            r"(是不是真的|是不是|靠谱吗|可信|出处|来源|发生了|怎么回事)",
+            text,
+        ):
+            return True
+        return any(keyword in lowered for keyword in ("real?", "true?", "fake?"))
+
+    def _build_fact_check_prompt(self, latest_text: str, history: list[str]) -> str:
+        history_text = "\n".join(history[-8:])
+        return f"""
+最近群聊：
+{history_text}
+
+需要顺手判断的一句：
+{latest_text}
+
+请判断这句话里的事实主张是否明显可信。你不一定有联网能力：
+- 如果能根据常识或上下文判断，就自然地说一句结论。
+- 如果需要最新资料或可靠来源，就说“这个得看来源/我不敢直接下结论”。
+- 不要装作已经联网查过。
+- 不要输出 true/false/unknown 格式。
+""".strip()
+
+    async def _maybe_topic_hint(self) -> str:
+        if not self.enable_dailyhub_topic_seed:
+            return ""
+        if random.random() >= self.dailyhub_topic_probability:
+            return ""
+
+        now = time.time()
+        cached = str(self.topic_cache.get("text") or "")
+        if cached and now < float(self.topic_cache.get("expires_at") or 0):
+            return cached
+
+        text = await self._fetch_topic_seed()
+        if text:
+            self.topic_cache = {
+                "expires_at": now + self.dailyhub_topic_refresh_seconds,
+                "text": text,
+            }
+        return text
+
+    async def _fetch_topic_seed(self) -> str:
+        try:
+            import aiohttp
+        except Exception:  # noqa: BLE001
+            logger.warning("group_vibe: aiohttp unavailable, skip topic seed")
+            return ""
+
+        timeout = aiohttp.ClientTimeout(total=self.dailyhub_topic_timeout_seconds)
+        collected: list[str] = []
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for key in self.dailyhub_topic_sources:
+                    endpoint = TOPIC_ENDPOINTS.get(key)
+                    if not endpoint:
+                        continue
+                    try:
+                        async with session.get(f"{self.dailyhub_api_base_url}{endpoint}") as resp:
+                            if resp.status != 200:
+                                continue
+                            payload = await resp.text()
+                            data = json.loads(payload)
+                            collected.extend(self._extract_topic_titles(key, data))
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(f"group_vibe topic source skipped: {key} {exc}")
+                    if len(collected) >= self.dailyhub_topic_max_items:
+                        break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"group_vibe topic seed fetch failed: {exc}")
+            return ""
+
+        titles = []
+        seen = set()
+        for item in collected:
+            clean = re.sub(r"\s+", " ", str(item)).strip()
+            if clean and clean not in seen:
+                titles.append(clean)
+                seen.add(clean)
+            if len(titles) >= self.dailyhub_topic_max_items:
+                break
+        if not titles:
+            return ""
+        return "\n".join(f"- {title}" for title in titles)
+
+    def _extract_topic_titles(self, key: str, payload: dict) -> list[str]:
+        data = payload.get("data") if isinstance(payload, dict) else payload
+        items = self._find_topic_items(data)
+        titles = []
+        for item in items:
+            if isinstance(item, str):
+                titles.append(f"{key}: {item}")
+                continue
+            if not isinstance(item, dict):
+                continue
+            title = (
+                item.get("title")
+                or item.get("name")
+                or item.get("word")
+                or item.get("keyword")
+                or item.get("content")
+                or item.get("desc")
+            )
+            if title:
+                titles.append(f"{key}: {title}")
+        return titles
+
+    def _find_topic_items(self, data) -> list:
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("items", "list", "news", "hot", "data", "rank", "results"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return value
+            for value in data.values():
+                if isinstance(value, list):
+                    return value
+        return []
 
     def _reply_probability(
         self,
@@ -259,14 +478,24 @@ class GroupVibePlugin(Star):
 只输出要发到群里的那句话，不要输出引号、前缀或解释。
 """.strip()
 
-    def _build_prompt(self, latest_text: str, history: list[str]) -> str:
+    def _build_prompt(self, latest_text: str, history: list[str], topic_hint: str = "") -> str:
         history_text = "\n".join(history[-10:])
+        topic_block = ""
+        if topic_hint:
+            topic_block = f"""
+
+可用的今日话题素材：
+{topic_hint}
+
+这些只是给你找话题用的素材。只有和群聊当前话题贴合时才顺手提一句，不要播报新闻，不要逐条总结。
+"""
         return f"""
 最近群聊：
 {history_text}
 
 最新一句：
 {latest_text}
+{topic_block}
 
 判断你现在是否适合自然接一句。适合的话，只写一句像普通群友会发的话。
 """.strip()

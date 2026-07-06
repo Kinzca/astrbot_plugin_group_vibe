@@ -167,6 +167,95 @@
     "default": 45,
     "hint": "超过该长度会截断，避免群聊回复太长"
   },
+  "_grp_dailyhub": {
+    "description": "──────── 每日资讯 / 热点话题素材 ────────",
+    "type": "object",
+    "items": {}
+  },
+  "enable_dailyhub_topic_seed": {
+    "description": "启用热点素材辅助聊天",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后会低频读取 60s / DailyHub 同源热点，只作为模型找话题的素材，不会自动播报新闻。"
+  },
+  "dailyhub_api_base_url": {
+    "description": "热点 API 地址",
+    "type": "string",
+    "default": "https://60s.viki.moe",
+    "hint": "与 DailyHub 默认 60s API 一致。若公共服务失效，可换成 DailyHub 里配置的备用 60s API。"
+  },
+  "dailyhub_topic_sources": {
+    "description": "热点素材来源",
+    "type": "string",
+    "default": "weibo,bili,douyin,rednote,itnews,ithome,news60s",
+    "hint": "英文逗号分隔。可选：weibo,bili,douyin,rednote,itnews,ithome,news60s。"
+  },
+  "dailyhub_topic_refresh_seconds": {
+    "description": "热点缓存刷新秒数",
+    "type": "int",
+    "default": 1800,
+    "hint": "热点素材缓存多久刷新一次，默认 30 分钟。"
+  },
+  "dailyhub_topic_probability": {
+    "description": "每次接话附带热点素材概率",
+    "type": "float",
+    "default": 0.18,
+    "hint": "0 到 1。不是发言概率，而是当机器人本来要接话时，有多大概率把热点素材给模型参考。"
+  },
+  "dailyhub_topic_max_items": {
+    "description": "热点素材最大条数",
+    "type": "int",
+    "default": 8,
+    "hint": "每次最多给模型多少条热点标题。"
+  },
+  "dailyhub_topic_timeout_seconds": {
+    "description": "热点请求超时秒数",
+    "type": "int",
+    "default": 6,
+    "hint": "获取热点素材的网络超时。失败会静默跳过，不影响普通聊天。"
+  },
+  "_grp_fact_check": {
+    "description": "──────── 自动真假判断 / 来源提醒 ────────",
+    "type": "object",
+    "items": {}
+  },
+  "enable_auto_fact_check": {
+    "description": "启用自动真假判断",
+    "type": "bool",
+    "default": true,
+    "hint": "命中“真的假的、网传、听说、有出处吗”等明显信号时，机器人会低频顺手判断或提醒看来源。"
+  },
+  "fact_check_probability": {
+    "description": "自动真假判断触发概率",
+    "type": "float",
+    "default": 0.38,
+    "hint": "0 到 1。命中事实核查信号后仍会按概率触发，避免打断正常群聊。"
+  },
+  "fact_check_cooldown_seconds": {
+    "description": "自动真假判断冷却秒数",
+    "type": "int",
+    "default": 480,
+    "hint": "同一群里两次自动真假判断之间的最短间隔。"
+  },
+  "fact_check_provider_id": {
+    "description": "真假判断使用的模型",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider",
+    "hint": "留空=使用当前会话默认模型。"
+  },
+  "fact_check_max_chars": {
+    "description": "真假判断最大字数",
+    "type": "int",
+    "default": 120,
+    "hint": "自动真假判断回复的最大长度。"
+  },
+  "fact_check_keywords": {
+    "description": "真假判断关键词",
+    "type": "string",
+    "default": "真的假的,这是真的吗,是真的吗,真吗,有出处吗,来源呢,网传,听说,据说,辟谣,造谣,假消息,靠谱吗,可信么,可信不,真的假的啊",
+    "hint": "英文逗号分隔。命中后进入自动真假判断候选。"
+  },
   "history_maxlen": {
     "description": "群聊上下文缓存条数",
     "type": "int",
