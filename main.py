@@ -3,11 +3,12 @@ import random
 import re
 import time
 from collections import defaultdict, deque
+from pathlib import Path
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Plain
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star, StarTools, register
 
 TOPIC_ENDPOINTS = {
     "news60s": "/v2/60s",
@@ -41,6 +42,7 @@ class GroupVibePlugin(Star):
         self.last_reply_sender: dict[str, str] = {}
         self.last_fact_check_at: dict[str, float] = {}
         self.topic_cache: dict[str, object] = {"expires_at": 0.0, "text": ""}
+        self.affection_cache: dict[tuple[str, str], tuple[float, str]] = {}
 
         self.enabled = self._get_bool("enabled", True)
         self.allowed_group_ids = self._get_keyword_list("allowed_group_ids", "")
@@ -90,6 +92,9 @@ class GroupVibePlugin(Star):
         self.enable_auto_fact_search = self._get_bool("enable_auto_fact_search", True)
         self.fact_search_max_results = self._get_int("fact_search_max_results", 5, 1, 10)
         self.fact_search_timeout_seconds = self._get_int("fact_search_timeout_seconds", 10, 1, 30)
+        self.enable_affection_context = self._get_bool("enable_affection_context", True)
+        self.affection_data_dir = str(self.config.get("affection_data_dir") or "").strip()
+        self.affection_cache_seconds = self._get_int("affection_cache_seconds", 20, 0, 600)
 
         self.vibe_keywords = self._get_keyword_list(
             "vibe_keywords",
@@ -121,6 +126,7 @@ class GroupVibePlugin(Star):
             f"fact_check={self.enable_auto_fact_check}/{self.fact_check_probability:.2f} "
             f"fact_search={self.enable_auto_fact_search} "
             f"topic_seed={self.enable_dailyhub_topic_seed}/{self.dailyhub_topic_probability:.2f} "
+            f"affection_context={self.enable_affection_context} "
             f"cooldowns={self.quiet_cooldown_seconds}/"
             f"{self.warm_cooldown_seconds}/"
             f"{self.hot_cooldown_seconds}"
@@ -195,11 +201,12 @@ class GroupVibePlugin(Star):
                 persona_prompt = persona.get("prompt", "") or ""
 
             topic_hint = await self._maybe_topic_hint()
+            affection_hint = self._build_affection_context_hint(event, sender_id)
             response = await provider.text_chat(
                 prompt=self._build_prompt(latest_text, list(self.history[umo]), topic_hint),
                 session_id=f"group-vibe:{umo}",
                 contexts=[],
-                system_prompt=self._build_system_prompt(persona_prompt),
+                system_prompt=self._build_system_prompt(persona_prompt, affection_hint),
                 temperature=self.provider_temperature,
             )
             reply = self._clean_reply(response.completion_text)
@@ -361,6 +368,140 @@ class GroupVibePlugin(Star):
 - 如果上面给了联网搜索摘要，可以说“看搜到的结果/资料里更像是...”，但不要编造没有出现的来源。
 - 不要输出 true/false/unknown 格式。
 """.strip()
+
+    def _build_affection_context_hint(self, event: AstrMessageEvent, sender_id: str) -> str:
+        if not self.enable_affection_context or not sender_id:
+            return ""
+
+        bot_id = self._get_event_self_id(event)
+        cache_key = (bot_id or "default_bot", sender_id)
+        now = time.time()
+        if self.affection_cache_seconds > 0:
+            cached = self.affection_cache.get(cache_key)
+            if cached and now - cached[0] < self.affection_cache_seconds:
+                return cached[1]
+
+        hint = self._read_affection_context_hint(bot_id, sender_id)
+        if self.affection_cache_seconds > 0:
+            self.affection_cache[cache_key] = (now, hint)
+        return hint
+
+    def _read_affection_context_hint(self, bot_id: str, sender_id: str) -> str:
+        base_dir = self._affection_base_dir()
+        if not base_dir:
+            return ""
+
+        for bot_dir in self._affection_candidate_dirs(base_dir, bot_id):
+            user_data = self._read_json_file(bot_dir / "user_data.json")
+            if not isinstance(user_data, dict):
+                continue
+            user = user_data.get(sender_id)
+            if not isinstance(user, dict):
+                continue
+            self_data = self._read_json_file(bot_dir / "self_data.json")
+            if not isinstance(self_data, dict):
+                self_data = {}
+            return self._format_affection_context(user, self_data)
+        return ""
+
+    def _affection_base_dir(self) -> Path | None:
+        if self.affection_data_dir:
+            return Path(self.affection_data_dir)
+        try:
+            return Path(StarTools.get_data_dir("astrbot_plugin_affection"))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"group_vibe: affection data dir unavailable: {exc}")
+            return None
+
+    def _affection_candidate_dirs(self, base_dir: Path, bot_id: str) -> list[Path]:
+        candidates: list[Path] = []
+        seen: set[str] = set()
+
+        def add(path: Path) -> None:
+            key = str(path)
+            if key not in seen and path.exists() and path.is_dir():
+                candidates.append(path)
+                seen.add(key)
+
+        if bot_id:
+            add(base_dir / str(bot_id))
+        add(base_dir / "default_bot")
+        try:
+            for child in sorted(base_dir.iterdir(), key=lambda item: item.name):
+                add(child)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"group_vibe: affection data scan skipped: {exc}")
+        return candidates
+
+    def _read_json_file(self, path: Path):
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                return json.load(file)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(f"group_vibe: failed to read affection data {path}: {exc}")
+            return None
+
+    def _format_affection_context(self, user_data: dict, self_data: dict) -> str:
+        affection = self._as_float(user_data.get("affection"), 50.0)
+        libido_other = self._as_float(user_data.get("current_libido_other"), 25.0)
+        aggression_other = self._as_float(user_data.get("current_aggression_other"), 25.0)
+        libido_self = self._as_float(self_data.get("current_libido_self"), 25.0)
+        aggression_self = self._as_float(self_data.get("current_aggression_self"), 25.0)
+
+        if affection >= 85:
+            relation = "已经很熟，语气可以更放松，偶尔接梗或开一点小玩笑"
+        elif affection >= 70:
+            relation = "熟人偏亲近，可以自然热络一点，但别突然太黏"
+        elif affection >= 55:
+            relation = "友好普通群友，顺着话题接一句就好"
+        elif affection >= 40:
+            relation = "还不算很熟，保持自然礼貌，别强行亲近"
+        else:
+            relation = "距离感更强，少主动贴近，回复要短一点"
+
+        if libido_other >= 37.5 and aggression_other < 25:
+            edge = "可以更愿意回应对方，语气稍微暖一点"
+        elif aggression_other >= 37.5:
+            edge = "可以有一点别扭或轻微吐槽，但不要攻击、挑衅或冷暴力"
+        elif libido_other <= 12.5:
+            edge = "兴致偏低，像普通群友随口搭一句，不要表现得过度热情"
+        else:
+            edge = "关系状态中性，主要看当前群聊上下文"
+
+        if aggression_self >= 37.5:
+            self_tone = "自身状态偏紧绷，最多体现为一句短促或没精神，不要卖惨"
+        elif libido_self >= 37.5:
+            self_tone = "自身状态比较稳定，可以更自信、更轻松一点"
+        else:
+            self_tone = "自身状态一般，保持平常聊天感"
+
+        return f"""
+当前关系氛围（内部参考，不要说出来）：
+- 对刚才发言的群友：{relation}
+- 临场边界：{edge}
+- 自身语气：{self_tone}
+使用要求：这只是语气微调，不要提好感度、插件、情绪数值或关系面板；即使状态很极端，也只转成普通群聊里的轻微熟稔、别扭、吐槽或保持距离。
+""".strip()
+
+    def _get_event_self_id(self, event: AstrMessageEvent) -> str:
+        try:
+            bot_id = event.get_self_id()
+            if bot_id:
+                return str(bot_id)
+        except Exception:  # noqa: BLE001
+            pass
+        message_obj = getattr(event, "message_obj", None)
+        bot_id = getattr(message_obj, "self_id", None)
+        return str(bot_id) if bot_id else "default_bot"
+
+    @staticmethod
+    def _as_float(value, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
 
     async def _maybe_topic_hint(self) -> str:
         if not self.enable_dailyhub_topic_seed:
@@ -533,9 +674,11 @@ class GroupVibePlugin(Star):
             values.popleft()
         return len(values)
 
-    def _build_system_prompt(self, persona_prompt: str) -> str:
+    def _build_system_prompt(self, persona_prompt: str, affection_hint: str = "") -> str:
+        affection_block = f"\n\n{affection_hint}" if affection_hint else ""
         return f"""
 {persona_prompt}
+{affection_block}
 
 你现在是在 QQ 群里偶尔接话的普通群友小号。
 回复要像群聊插话，不像客服、助手、主持人或总结机器人。

@@ -10,6 +10,7 @@
 - 有防刷屏阈值，避免短时间内连续刷屏。
 - 支持热点素材辅助聊天：低频读取 60s / DailyHub 同源热榜，只作为找话题素材，不会直接播报新闻。
 - 支持轻量自动真假判断：群里出现“真的假的、网传、有出处吗”等明显信号时，低频顺手判断或提醒看来源。
+- 支持读取 `astrbot_plugin_affection` 的关系状态，把好感度/情绪状态转译成自然群聊语气参考，不需要在人设末尾追加固定情绪规则。
 - 支持 AstrBot WebUI 插件设置页调整参数。
 
 ## 推荐额外插件
@@ -21,6 +22,7 @@
 | `AMag1c/astrbot_plugin_dailyhub` | 每日资讯、热搜、AI 日报、Epic 免费游戏等信息源。建议把每日推送设置为私聊 QQ，不要默认发群。`group_vibe` 可读取同源热点作为自然聊天素材。 |
 | `konley/astrbot_plugin_isittrue` | 手动事实核查插件。群友可以通过 @ 或引用消息触发更明确的“是真的吗”判断。`group_vibe` 内置的是低频轻量判断，用于无感知对话。 |
 | `astrbot_plugin_anysearch`（可选） | 给事实核查提供联网搜索增强。安装后，`group_vibe` 的自动真假判断会先调用 `anysearch_search` 获取搜索摘要，再让模型生成自然回复；未安装时仍会回退到模型自身判断。 |
+| `middcom/astrbot_plugin_affection`（推荐） | 给群友关系提供长期氛围状态。`group_vibe` 会读取它保存的关系数据，并转成“更熟一点、保持距离、轻微别扭、语气放松”等内部语气提示；不需要再把 affection README 里的固定情绪驱动规则贴到人设末尾。 |
 
 ## 推荐默认参数
 
@@ -37,6 +39,8 @@
 - 自动真假判断冷却：480 秒
 - 自动真假判断搜索结果数：5
 - 自动真假判断搜索超时：10 秒
+- affection 关系氛围适配：开启
+- affection 关系氛围缓存：20 秒
 - 回复最大长度：45 字
 
 ## 安装
@@ -59,6 +63,16 @@ data/plugins/astrbot_plugin_group_vibe
 - `简化目标应用到哪些资讯源`：默认 `news60s,ai,epic`
 
 这样每日资讯会私聊发给指定 QQ，而 `group_vibe` 只把热点作为聊天素材使用。
+
+## Affection 配合方式
+
+推荐安装 `middcom/astrbot_plugin_affection` 后，在 `group_vibe` 设置页保持：
+
+- `启用 affection 关系氛围适配`：开启
+- `affection 数据目录`：留空，自动读取 `astrbot_plugin_affection` 的插件数据目录
+- `关系氛围缓存秒数`：默认 20 秒即可
+
+`group_vibe` 不会把 affection 的数值面板直接发给模型，也不会要求你在人设里追加固定“情绪驱动规则”。它只读取 affection 已保存的用户关系状态，然后转译成更克制的群聊语气参考。没有安装 affection、没有对应群友数据、或数据目录不可读时，会自动跳过，不影响普通聊天。
 
 ## 注意
 

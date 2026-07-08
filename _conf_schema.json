@@ -268,6 +268,29 @@
     "default": 10,
     "hint": "Anysearch 搜索超时后会回退到仅模型判断，不影响正常聊天。"
   },
+  "_grp_affection": {
+    "description": "──────── 关系氛围 / 好感度上下文 ────────",
+    "type": "object",
+    "items": {}
+  },
+  "enable_affection_context": {
+    "description": "启用 affection 关系氛围适配",
+    "type": "bool",
+    "default": true,
+    "hint": "需要额外安装 middcom/astrbot_plugin_affection。开启后，group_vibe 会读取其保存的关系状态，并转成自然群聊语气参考；不需要再在人设末尾添加固定情绪规则。"
+  },
+  "affection_data_dir": {
+    "description": "affection 数据目录",
+    "type": "string",
+    "default": "",
+    "hint": "留空时自动读取 astrbot_plugin_affection 的插件数据目录。只有在自动探测失败或自定义数据目录时才需要填写。"
+  },
+  "affection_cache_seconds": {
+    "description": "关系氛围缓存秒数",
+    "type": "int",
+    "default": 20,
+    "hint": "避免每条消息都读取 JSON 文件。设置为 0 表示不缓存。"
+  },
   "fact_check_keywords": {
     "description": "真假判断关键词",
     "type": "string",
